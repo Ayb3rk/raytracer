@@ -1,4 +1,3 @@
-#include <iostream>
 #include "parser.h"
 #include "ppm.h"
 #include <cmath>
@@ -31,7 +30,7 @@ parser::Vec3f normalize(parser::Vec3f a)
 
 parser::Vec3f add(parser::Vec3f a, parser::Vec3f b)
 {
-    parser::Vec3f result;
+    parser::Vec3f result{};
     result.x = a.x+b.x;
     result.y = a.y+b.y;
     result.z = a.z+b.z;
@@ -45,7 +44,7 @@ parser::Vec3f CrossProduct(parser::Vec3f a, parser::Vec3f b) {
     return result;
 }
 
-Ray GenerateRay(int i, int j, parser::Camera camera, int width, int height)
+Ray GenerateRay(int i, int j, const parser::Camera& camera, int width, int height)
 {
     Ray result{};
     float su,sv;
@@ -56,8 +55,8 @@ Ray GenerateRay(int i, int j, parser::Camera camera, int width, int height)
     auto bottom = camera.near_plane.z;
     auto top = camera.near_plane.w;
 
-    su = (i+0.5)*(right - left)/width;
-    sv = (j+0.5)*(top - bottom)/height;
+    su = (float) (i+0.5)*(right - left)/(float) width;
+    sv = (float) (j+0.5)*(top - bottom)/(float) height;
     parser::Vec3f v = camera.up;
     parser::Vec3f w = multS(camera.gaze,-1);
     parser::Vec3f u = CrossProduct(v,w);
@@ -72,16 +71,12 @@ Ray GenerateRay(int i, int j, parser::Camera camera, int width, int height)
 
 
 
-double intersectSphere (parser::Vec3f sphereCenter, double sphereRadius, Ray ray) {
+float intersectSphere (parser::Vec3f sphereCenter, float sphereRadius, Ray ray) {
     float A,B,C; //constants for the quadratic equation
-
     float delta;
-
-    parser::Vec3f c;
-
-    c = sphereCenter;
-
     float t,t1,t2;
+
+    parser::Vec3f c = sphereCenter;
 
     C = (ray.origin.x-c.x)*(ray.origin.x-c.x)+(ray.origin.y-c.y)*(ray.origin.y-c.y)+(ray.origin.z-c.z)*(ray.origin.z-c.z)-sphereRadius*sphereRadius;
 
@@ -103,7 +98,7 @@ double intersectSphere (parser::Vec3f sphereCenter, double sphereRadius, Ray ray
         t1 = (-B + delta) / A;
         t2 = (-B - delta) / A;
 
-        if (t1<t2) t=t1; else t=t2;
+        t1<t2 ? t=t1 : t=t2;
     }
 
     return t;
@@ -111,26 +106,67 @@ double intersectSphere (parser::Vec3f sphereCenter, double sphereRadius, Ray ray
 
 parser::Vec3f ComputeColor(Ray ray, parser::Scene scene)
 {
-    double t = 1000000;
+    float t = 1000000;
     parser::Vec3f color{};
     parser::Sphere intersectedSphere{};
+    parser::Mesh intersectedMesh{};
     for (auto sphere : scene.spheres) {
         auto sphereCenter = scene.vertex_data[sphere.center_vertex_id-1];
-        double temp = intersectSphere(sphereCenter, sphere.radius, ray);
+        float temp = intersectSphere(sphereCenter, sphere.radius, ray);
         if (temp > 0 && temp < t) {
             t = temp;
             intersectedSphere = sphere;
         }
     }
+    for (auto mesh : scene.meshes) {
+        for (auto face : mesh.faces) {
+            auto v1 = scene.vertex_data[face.v0_id-1];
+            auto v2 = scene.vertex_data[face.v1_id-1];
+            auto v3 = scene.vertex_data[face.v2_id-1];
+            auto e1 = add(v2,multS(v1,-1));
+            auto e2 = add(v3,multS(v1,-1));
+            auto pvec = CrossProduct(ray.direction,e2);
+            auto det = dot(e1,pvec);
+            if (det > -0.000001 && det < 0.000001) continue;
+            auto inv_det = 1.0/det;
+            auto tvec = add(ray.origin,multS(v1,-1));
+            auto u = dot(tvec,pvec)*inv_det;
+            if (u < 0 || u > 1) continue;
+            auto qvec = CrossProduct(tvec,e1);
+            auto v = dot(ray.direction,qvec)*inv_det;
+            if (v < 0 || u + v > 1) continue;
+            auto temp = dot(e2,qvec)*inv_det;
+            if (temp > 0 && temp < t) {
+                t = temp;
+                intersectedMesh = mesh;
+            }
+        }
+    }
     if (t == 1000000) {
         return color;
     }
-    auto P = add(ray.origin, multS(ray.direction, t));
-    auto L = normalize(add(scene.point_lights[0].position, multS(P, -1)));
-    auto N = normalize(add(P, multS(scene.vertex_data[intersectedSphere.center_vertex_id-1], -1)));
-    color = multS(scene.materials[intersectedSphere.material_id-1].diffuse, dot(L, N));
+    if (intersectedSphere.radius != 0) {
+        auto P = add(ray.origin,multS(ray.direction,t));
+        auto L = normalize(add(scene.point_lights[0].position,multS(P,-1)));
+        auto N = normalize(add(P,multS(scene.vertex_data[intersectedSphere.center_vertex_id-1],-1)));
+        auto W = normalize(add(ray.origin,multS(P,-1)));
+        auto H = normalize(add(L,W));
+        auto lightDistance = sqrt((scene.point_lights[0].position.x-P.x)*(scene.point_lights[0].position.x-P.x)+(scene.point_lights[0].position.y-P.y)*(scene.point_lights[0].position.y-P.y)+(scene.point_lights[0].position.z-P.z)*(scene.point_lights[0].position.z-P.z));
+        auto receivedIrradiance = normalize(multS(scene.point_lights[0].intensity,1/(lightDistance*lightDistance)));
+        auto cosAlphaSpecular = fmax(dot(N,H),0.0);
+        auto cosAlphaDiffuse = fmax(dot(N,L),0.0);
+        auto specular = multS(scene.materials[intersectedSphere.material_id-1].specular,pow(cosAlphaSpecular, scene.materials[intersectedSphere.material_id-1].phong_exponent));
+        auto diffuse = multS(scene.materials[intersectedSphere.material_id-1].diffuse,cosAlphaDiffuse);
+        color = add(color, add(diffuse, specular));
+        color.x += color.x*receivedIrradiance.x + (scene.ambient_light.x*scene.materials[intersectedSphere.material_id-1].ambient.x)/255;
+        color.y += color.y*receivedIrradiance.y + (scene.ambient_light.y*scene.materials[intersectedSphere.material_id-1].ambient.y)/255;
+        color.z += color.z*receivedIrradiance.z + (scene.ambient_light.z*scene.materials[intersectedSphere.material_id-1].ambient.z)/255;
+    }
+    if (!intersectedMesh.faces.empty()) {
+        auto meshColor = scene.materials[intersectedMesh.material_id-1].diffuse;
+        color = add(CrossProduct(scene.materials[intersectedMesh.material_id-1].ambient,scene.ambient_light), meshColor);
+    }
     return color;
-
 }
 
 int main(int argc, char* argv[])
@@ -160,9 +196,9 @@ int main(int argc, char* argv[])
             Ray ray{};
             ray = GenerateRay(i, j, scene.cameras[0], width, height);
             auto color = ComputeColor(ray, scene);
-            image[(j * width + i) * 3] = color.x * 255 + scene.ambient_light.x;
-            image[(j * width + i) * 3 + 1] = color.y * 255 + scene.ambient_light.y;
-            image[(j * width + i) * 3 + 2] = color.z * 255 + scene.ambient_light.z;
+            image[(j * width + i) * 3] = color.x * 255 > 255 ? 255 : color.x * 255;
+            image[(j * width + i) * 3 + 1] = color.y * 255 > 255 ? 255 : color.y * 255;
+            image[(j * width + i) * 3 + 2] = color.z * 255 > 255 ? 255 : color.z * 255;
         }
     }
 
