@@ -45,12 +45,30 @@ parser::Vec3f add(parser::Vec3f a, parser::Vec3f b)
     result.z = a.z+b.z;
     return result;
 }
+
+parser::Vec3f sub(parser::Vec3f a, parser::Vec3f b)
+{
+    parser::Vec3f result{};
+    result.x = a.x-b.x;
+    result.y = a.y-b.y;
+    result.z = a.z-b.z;
+    return result;
+}
 parser::Vec3f CrossProduct(parser::Vec3f a, parser::Vec3f b) {
     parser::Vec3f result{};
     result.x = a.y * b.z - a.z * b.y;
     result.y = a.z * b.x - a.x * b.z;
     result.z = a.x * b.y - a.y * b.x;
     return result;
+}
+
+parser::Vec3f NormalOfFace(parser::Face face, std::vector<parser::Vec3f> vertices) {
+    parser::Vec3f v0 = vertices[face.v0_id];
+    parser::Vec3f v1 = vertices[face.v1_id];
+    parser::Vec3f v2 = vertices[face.v2_id];
+    parser::Vec3f v01 = sub(v1, v0);
+    parser::Vec3f v02 = sub(v2, v0);
+    return normalize(CrossProduct(v01, v02));
 }
 
 Ray GenerateRay(int i, int j, const parser::Camera& camera, int width, int height)
@@ -173,7 +191,7 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene)
     if (!intersectedMesh.faces.empty()) {
         auto P = add(ray.origin,multS(ray.direction,t));
         auto L = normalize(add(scene.point_lights[0].position,multS(P,-1)));
-        auto N = normalize(add(P,multS(scene.vertex_data[intersectedMesh.faces[0].v0_id-1],-1)));
+        auto N = NormalOfFace(intersectedMesh.faces[0], scene.vertex_data);
         auto W = normalize(add(ray.origin,multS(P,-1)));
         auto H = normalize(add(L,W));
         auto lightDistance = sqrt((scene.point_lights[0].position.x-P.x)*(scene.point_lights[0].position.x-P.x)+(scene.point_lights[0].position.y-P.y)*(scene.point_lights[0].position.y-P.y)+(scene.point_lights[0].position.z-P.z)*(scene.point_lights[0].position.z-P.z));
