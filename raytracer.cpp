@@ -28,6 +28,15 @@ parser::Vec3f normalize(parser::Vec3f a)
     return multS(a,1.0/sqrt(dot(a,a)));
 }
 
+parser::Vec3f hadamard(parser::Vec3f a,parser::Vec3f b)
+{
+    parser::Vec3f result{};
+    result.x = a.x*b.x;
+    result.y = a.y*b.y;
+    result.z = a.z*b.z;
+    return result;
+}
+
 parser::Vec3f add(parser::Vec3f a, parser::Vec3f b)
 {
     parser::Vec3f result{};
@@ -152,19 +161,30 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene)
         auto W = normalize(add(ray.origin,multS(P,-1)));
         auto H = normalize(add(L,W));
         auto lightDistance = sqrt((scene.point_lights[0].position.x-P.x)*(scene.point_lights[0].position.x-P.x)+(scene.point_lights[0].position.y-P.y)*(scene.point_lights[0].position.y-P.y)+(scene.point_lights[0].position.z-P.z)*(scene.point_lights[0].position.z-P.z));
-        auto receivedIrradiance = normalize(multS(scene.point_lights[0].intensity,1/(lightDistance*lightDistance)));
+        auto receivedIrradiance = multS(scene.point_lights[0].intensity,1/(lightDistance*lightDistance));
         auto cosAlphaSpecular = fmax(dot(N,H),0.0);
         auto cosAlphaDiffuse = fmax(dot(N,L),0.0);
         auto specular = multS(scene.materials[intersectedSphere.material_id-1].specular,pow(cosAlphaSpecular, scene.materials[intersectedSphere.material_id-1].phong_exponent));
         auto diffuse = multS(scene.materials[intersectedSphere.material_id-1].diffuse,cosAlphaDiffuse);
         color = add(color, add(diffuse, specular));
-        color.x += color.x*receivedIrradiance.x + (scene.ambient_light.x*scene.materials[intersectedSphere.material_id-1].ambient.x)/255;
-        color.y += color.y*receivedIrradiance.y + (scene.ambient_light.y*scene.materials[intersectedSphere.material_id-1].ambient.y)/255;
-        color.z += color.z*receivedIrradiance.z + (scene.ambient_light.z*scene.materials[intersectedSphere.material_id-1].ambient.z)/255;
+        color = hadamard(color, receivedIrradiance);
+        color = add(color, hadamard(scene.materials[intersectedSphere.material_id-1].ambient, scene.ambient_light));
     }
     if (!intersectedMesh.faces.empty()) {
-        auto meshColor = scene.materials[intersectedMesh.material_id-1].diffuse;
-        color = add(CrossProduct(scene.materials[intersectedMesh.material_id-1].ambient,scene.ambient_light), meshColor);
+        auto P = add(ray.origin,multS(ray.direction,t));
+        auto L = normalize(add(scene.point_lights[0].position,multS(P,-1)));
+        auto N = normalize(add(P,multS(scene.vertex_data[intersectedMesh.faces[0].v0_id-1],-1)));
+        auto W = normalize(add(ray.origin,multS(P,-1)));
+        auto H = normalize(add(L,W));
+        auto lightDistance = sqrt((scene.point_lights[0].position.x-P.x)*(scene.point_lights[0].position.x-P.x)+(scene.point_lights[0].position.y-P.y)*(scene.point_lights[0].position.y-P.y)+(scene.point_lights[0].position.z-P.z)*(scene.point_lights[0].position.z-P.z));
+        auto receivedIrradiance = multS(scene.point_lights[0].intensity,1/(lightDistance*lightDistance));
+        auto cosAlphaSpecular = fmax(dot(N,H),0.0);
+        auto cosAlphaDiffuse = fmax(dot(N,L),0.0);
+        auto specular = multS(scene.materials[intersectedMesh.material_id-1].specular,pow(cosAlphaSpecular, scene.materials[intersectedMesh.material_id-1].phong_exponent));
+        auto diffuse = multS(scene.materials[intersectedMesh.material_id-1].diffuse,cosAlphaDiffuse);
+        color = add(color, add(diffuse, specular));
+        color = hadamard(color, receivedIrradiance);
+        color = add(color, hadamard(scene.materials[intersectedMesh.material_id-1].ambient, scene.ambient_light));
     }
     return color;
 }
@@ -196,9 +216,9 @@ int main(int argc, char* argv[])
             Ray ray{};
             ray = GenerateRay(i, j, scene.cameras[0], width, height);
             auto color = ComputeColor(ray, scene);
-            image[(j * width + i) * 3] = color.x * 255 > 255 ? 255 : color.x * 255;
-            image[(j * width + i) * 3 + 1] = color.y * 255 > 255 ? 255 : color.y * 255;
-            image[(j * width + i) * 3 + 2] = color.z * 255 > 255 ? 255 : color.z * 255;
+            image[(j * width + i) * 3] = color.x > 255 ? 255 : round(color.x);
+            image[(j * width + i) * 3 + 1] = color.y > 255 ? 255 : round(color.y);
+            image[(j * width + i) * 3 + 2] = color.z > 255 ? 255 : round(color.z);
         }
     }
 
