@@ -131,6 +131,38 @@ float intersectSphere (parser::Vec3f sphereCenter, float sphereRadius, Ray ray) 
     return t;
 }
 
+//intersect mesh function by using barycentric coordinates
+parser::Vec3f intersectFace (parser::Face face, Ray ray, parser::Scene scene) {
+    parser::Vec3f v0 = scene.vertex_data[face.v0_id - 1];
+    parser::Vec3f v1 = scene.vertex_data[face.v1_id - 1];
+    parser::Vec3f v2 = scene.vertex_data[face.v2_id - 1];
+    float beta, gamma;
+    float t;
+
+    //denom_det is the determinant of the A matrix in the slide
+    float denom_det = (v0.x - v1.x)*((ray.direction.z * (v0.y - v2.y)) - (v0.z - v2.z * ray.direction.y));
+    denom_det += (v0.y - v1.y)*(ray.direction.x * (v0.z - v2.z) - (v0.x - v2.x) * ray.direction.z);
+    denom_det += (v0.z - v1.z)*(ray.direction.y * (v0.x - v2.x) - (v0.y - v2.y) * ray.direction.x);
+
+    float beta_det = (v0.x-ray.origin.x) * ((v0.y - v2.y) * ray.direction.z - (v0.z - v2.z) * ray.direction.y);
+    beta_det += (v0.y - ray.origin.y) * ((v0.z - v2.z) * ray.direction.x - (v0.x - v2.x) * ray.direction.z);
+    beta_det += (v0.z - ray.origin.z) * ((v0.x - v2.x) * ray.direction.y - (v0.y - v2.y) * ray.direction.x);
+
+    float gamma_det = (v0.x - v1.x) * ((v0.y - ray.origin.y) * ray.direction.z - (v0.z - ray.origin.z) * ray.direction.y);
+    gamma_det += (v0.y - v1.y) * ((v0.z - ray.origin.z) * ray.direction.x - (v0.x - ray.origin.x) * ray.direction.z);
+    gamma_det += (v0.z - v1.z) * ((v0.x - ray.origin.x) * ray.direction.y - (v0.y - ray.origin.y) * ray.direction.x);
+
+    float t_det = (v0.x - v1.x) * ((v0.y - v2.y) * (v0.z - ray.origin.z) - (v0.z - v2.z) * (v0.y - ray.origin.y));
+    t_det += (v0.y - v1.y) * ((v0.z - v2.z) * (v0.x - ray.origin.x) - (v0.x - v2.x) * (v0.z - ray.origin.z));
+    t_det += (v0.z - v1.z) * ((v0.x - v2.x) * (v0.y - ray.origin.y) - (v0.y - v2.y) * (v0.x - ray.origin.x));
+
+    beta = beta_det/denom_det;
+    gamma = gamma_det/denom_det;
+    t = t_det/denom_det;
+
+    return {t, beta, gamma};
+}
+
 parser::Vec3f ComputeColor(Ray ray, parser::Scene scene)
 {
     float t = 1000000;
@@ -147,24 +179,10 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene)
     }
     for (auto mesh : scene.meshes) {
         for (auto face : mesh.faces) {
-            auto v1 = scene.vertex_data[face.v0_id-1];
-            auto v2 = scene.vertex_data[face.v1_id-1];
-            auto v3 = scene.vertex_data[face.v2_id-1];
-            auto e1 = add(v2,multS(v1,-1));
-            auto e2 = add(v3,multS(v1,-1));
-            auto pvec = CrossProduct(ray.direction,e2);
-            auto det = dot(e1,pvec);
-            if (det > -0.000001 && det < 0.000001) continue;
-            auto inv_det = 1.0/det;
-            auto tvec = add(ray.origin,multS(v1,-1));
-            auto u = dot(tvec,pvec)*inv_det;
-            if (u < 0 || u > 1) continue;
-            auto qvec = CrossProduct(tvec,e1);
-            auto v = dot(ray.direction,qvec)*inv_det;
-            if (v < 0 || u + v > 1) continue;
-            auto temp = dot(e2,qvec)*inv_det;
-            if (temp > 0 && temp < t) {
-                t = temp;
+            auto temp = intersectFace(face, ray, scene);
+            // function returns a Vec3f where temp.x is t, temp.y is beta, temp.z is gamma
+            if (temp.x > 0 && temp.x < t && temp.y >= 0 && temp.z >= 0 && (temp.y + temp.z) <= 1) {
+                t = temp.x;
                 intersectedMesh = mesh;
             }
         }
