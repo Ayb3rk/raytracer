@@ -1,6 +1,7 @@
 #include "parser.h"
 #include "ppm.h"
 #include <cmath>
+#include <cfloat>
 
 typedef unsigned char RGB[3];
 
@@ -66,9 +67,9 @@ parser::Vec3f NormalOfFace(parser::Face face, std::vector<parser::Vec3f> vertice
     parser::Vec3f v0 = vertices[face.v0_id];
     parser::Vec3f v1 = vertices[face.v1_id];
     parser::Vec3f v2 = vertices[face.v2_id];
-    parser::Vec3f v01 = sub(v1, v0);
-    parser::Vec3f v02 = sub(v2, v0);
-    return normalize(CrossProduct(v01, v02));
+    parser::Vec3f v01 = sub(v0, v1);
+    parser::Vec3f v20 = sub(v2, v1);
+    return normalize(CrossProduct(v20, v01));
 }
 
 Ray GenerateRay(int i, int j, const parser::Camera& camera, int width, int height)
@@ -131,41 +132,67 @@ float intersectSphere (parser::Vec3f sphereCenter, float sphereRadius, Ray ray) 
     return t;
 }
 
+float determinant(float matrix[3][3]) {
+    float result = 0;
+    result += matrix[0][0] * matrix[1][1] * matrix[2][2]; // a*e*i
+    result += matrix[1][0] * matrix[2][1] * matrix[0][2]; // b*f*g
+    result += matrix[2][0] * matrix[0][1] * matrix[1][2]; // c*d*h
+    result -= matrix[2][0] * matrix[1][1] * matrix[0][2]; // c*e*g
+    result -= matrix[1][0] * matrix[0][1] * matrix[2][2]; // b*d*i
+    result -= matrix[0][0] * matrix[2][1] * matrix[1][2]; // a*f*h
+    return result;
+}
+
 //intersect mesh function by using barycentric coordinates
-parser::Vec3f intersectFace (parser::Face face, Ray ray, parser::Scene scene) {
+float intersectFace (parser::Face face, Ray ray, parser::Scene scene) {
     parser::Vec3f v0 = scene.vertex_data[face.v0_id - 1];
     parser::Vec3f v1 = scene.vertex_data[face.v1_id - 1];
     parser::Vec3f v2 = scene.vertex_data[face.v2_id - 1];
-    float beta, gamma;
-    float t;
+    float beta, gamma, t;
 
-    //denom_det is the determinant of the A matrix in the slide
-    float denom_det = (v0.x - v1.x)*((ray.direction.z * (v0.y - v2.y)) - (v0.z - v2.z * ray.direction.y));
-    denom_det += (v0.y - v1.y)*(ray.direction.x * (v0.z - v2.z) - (v0.x - v2.x) * ray.direction.z);
-    denom_det += (v0.z - v1.z)*(ray.direction.y * (v0.x - v2.x) - (v0.y - v2.y) * ray.direction.x);
+    float AMatrix[3][3] = {
+        {v0.x - v1.x, v0.x - v2.x, ray.direction.x}, //[a_x - b_x, a_x - c_x, d_x]
+        {v0.y - v1.y, v0.y - v2.y, ray.direction.y}, //[a_y - b_y, a_y - c_y, d_y]
+        {v0.z - v1.z, v0.z - v2.z, ray.direction.z} //[a_z - b_z, a_z - c_z, d_z]
+    };
 
-    float beta_det = (v0.x-ray.origin.x) * ((v0.y - v2.y) * ray.direction.z - (v0.z - v2.z) * ray.direction.y);
-    beta_det += (v0.y - ray.origin.y) * ((v0.z - v2.z) * ray.direction.x - (v0.x - v2.x) * ray.direction.z);
-    beta_det += (v0.z - ray.origin.z) * ((v0.x - v2.x) * ray.direction.y - (v0.y - v2.y) * ray.direction.x);
+    float betaMatrix[3][3] = {
+        {v0.x - ray.origin.x, v0.x - v2.x, ray.direction.x}, //[a_x - o_x, a_x - c_x, d_x]
+        {v0.y - ray.origin.y, v0.y - v2.y, ray.direction.y}, //[a_y - o_y, a_y - c_y, d_y]
+        {v0.z - ray.origin.z, v0.z - v2.z, ray.direction.z} //[a_z - o_z, a_z - c_z, d_z]
+    };
 
-    float gamma_det = (v0.x - v1.x) * ((v0.y - ray.origin.y) * ray.direction.z - (v0.z - ray.origin.z) * ray.direction.y);
-    gamma_det += (v0.y - v1.y) * ((v0.z - ray.origin.z) * ray.direction.x - (v0.x - ray.origin.x) * ray.direction.z);
-    gamma_det += (v0.z - v1.z) * ((v0.x - ray.origin.x) * ray.direction.y - (v0.y - ray.origin.y) * ray.direction.x);
+    float gammaMatrix[3][3] = {
+        {v0.x - v1.x, v0.x - ray.origin.x, ray.direction.x}, //[a_x - b_x, a_x - o_x, d_x]
+        {v0.y - v1.y, v0.y - ray.origin.y, ray.direction.y}, //[a_y - b_y, a_y - o_y, d_y]
+        {v0.z - v1.z, v0.z - ray.origin.z, ray.direction.z} //[a_z - b_z, a_z - o_z, d_z]
+    };
 
-    float t_det = (v0.x - v1.x) * ((v0.y - v2.y) * (v0.z - ray.origin.z) - (v0.z - v2.z) * (v0.y - ray.origin.y));
-    t_det += (v0.y - v1.y) * ((v0.z - v2.z) * (v0.x - ray.origin.x) - (v0.x - v2.x) * (v0.z - ray.origin.z));
-    t_det += (v0.z - v1.z) * ((v0.x - v2.x) * (v0.y - ray.origin.y) - (v0.y - v2.y) * (v0.x - ray.origin.x));
+    float tMatrix[3][3] = {
+        {v0.x - v1.x, v0.x - v2.x, v0.x - ray.origin.x}, //[a_x - b_x, a_x - c_x, a_x - o_x]
+        {v0.y - v1.y, v0.y - v2.y, v0.y - ray.origin.y}, //[a_y - b_y, a_y - c_y, a_y - o_y]
+        {v0.z - v1.z, v0.z - v2.z, v0.z - ray.origin.z} //[a_z - b_z, a_z - c_z, a_z - o_z]
+    };
 
-    beta = beta_det/denom_det;
-    gamma = gamma_det/denom_det;
-    t = t_det/denom_det;
+    auto determinantA = determinant(AMatrix);
+    if (determinantA == 0) return -1;
 
-    return {t, beta, gamma};
+    beta = determinant(betaMatrix) / determinantA;
+    gamma = determinant(gammaMatrix) / determinantA;
+    t = determinant(tMatrix) / determinantA;
+
+    if (beta >= 0 && gamma >= 0 && beta + gamma <= 1) return t;
+    else return -1;
+
 }
 
-parser::Vec3f ComputeColor(Ray ray, parser::Scene scene)
+parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
 {
-    float t = 1000000;
+
+    if(depth == 0) {
+        return {0, 0, 0};
+    }
+    float t = FLT_MAX;
     parser::Vec3f color{};
     parser::Sphere intersectedSphere{};
     parser::Mesh intersectedMesh{};
@@ -180,14 +207,13 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene)
     for (auto mesh : scene.meshes) {
         for (auto face : mesh.faces) {
             auto temp = intersectFace(face, ray, scene);
-            // function returns a Vec3f where temp.x is t, temp.y is beta, temp.z is gamma
-            if (temp.x > 0 && temp.x < t && temp.y >= 0 && temp.z >= 0 && (temp.y + temp.z) <= 1) {
-                t = temp.x;
+            if (temp > 0 && temp < t) {
+                t = temp;
                 intersectedMesh = mesh;
             }
         }
     }
-    if (t == 1000000) {
+    if (t == FLT_MAX) {
         return color;
     }
     if (intersectedSphere.radius != 0) {
@@ -205,22 +231,36 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene)
         color = add(color, add(diffuse, specular));
         color = hadamard(color, receivedIrradiance);
         color = add(color, hadamard(scene.materials[intersectedSphere.material_id-1].ambient, scene.ambient_light));
+
+        Ray reflectedRay{};
+        reflectedRay.origin = P;
+        reflectedRay.direction = normalize(add(ray.direction,multS(N,-2*dot(N,ray.direction))));
+        auto reflectedColor = ComputeColor(reflectedRay, scene, depth-1);
+        color = add(color, hadamard(reflectedColor, scene.materials[intersectedSphere.material_id-1].mirror));
     }
     if (!intersectedMesh.faces.empty()) {
-        auto P = add(ray.origin,multS(ray.direction,t));
-        auto L = normalize(add(scene.point_lights[0].position,multS(P,-1)));
-        auto N = NormalOfFace(intersectedMesh.faces[0], scene.vertex_data);
-        auto W = normalize(add(ray.origin,multS(P,-1)));
-        auto H = normalize(add(L,W));
-        auto lightDistance = sqrt((scene.point_lights[0].position.x-P.x)*(scene.point_lights[0].position.x-P.x)+(scene.point_lights[0].position.y-P.y)*(scene.point_lights[0].position.y-P.y)+(scene.point_lights[0].position.z-P.z)*(scene.point_lights[0].position.z-P.z));
-        auto receivedIrradiance = multS(scene.point_lights[0].intensity,1/(lightDistance*lightDistance));
-        auto cosAlphaSpecular = fmax(dot(N,H),0.0);
-        auto cosAlphaDiffuse = fmax(dot(N,L),0.0);
-        auto specular = multS(scene.materials[intersectedMesh.material_id-1].specular,pow(cosAlphaSpecular, scene.materials[intersectedMesh.material_id-1].phong_exponent));
-        auto diffuse = multS(scene.materials[intersectedMesh.material_id-1].diffuse,cosAlphaDiffuse);
-        color = add(color, add(diffuse, specular));
-        color = hadamard(color, receivedIrradiance);
-        color = add(color, hadamard(scene.materials[intersectedMesh.material_id-1].ambient, scene.ambient_light));
+        for (auto lights : scene.point_lights) {
+            auto P = add(ray.origin,multS(ray.direction,t));
+            auto L = normalize(add(lights.position,multS(P,-1)));
+            auto N = normalize(NormalOfFace(intersectedMesh.faces[0], scene.vertex_data));
+            auto W = normalize(add(ray.origin,multS(P,-1)));
+            auto H = normalize(add(L,W));
+            auto lightDistance = sqrt((lights.position.x-P.x)*(lights.position.x-P.x)+(lights.position.y-P.y)*(lights.position.y-P.y)+(lights.position.z-P.z)*(lights.position.z-P.z));
+            auto receivedIrradiance = multS(lights.intensity,1/(lightDistance*lightDistance));
+            auto cosAlphaSpecular = fmax(dot(N,H),0.0);
+            auto cosAlphaDiffuse = fmax(dot(N,L),0.0);
+            auto specular = multS(scene.materials[intersectedMesh.material_id-1].specular,pow(cosAlphaSpecular, scene.materials[intersectedMesh.material_id-1].phong_exponent));
+            auto diffuse = multS(scene.materials[intersectedMesh.material_id-1].diffuse,cosAlphaDiffuse);
+            color = add(color, add(diffuse, specular));
+            color = hadamard(color, receivedIrradiance);
+            color = add(color, hadamard(scene.materials[intersectedMesh.material_id-1].ambient, scene.ambient_light));
+
+            Ray reflectedRay{};
+            reflectedRay.origin = P;
+            reflectedRay.direction = normalize(add(ray.direction,multS(N,-2*dot(N,ray.direction))));
+            auto reflectedColor = ComputeColor(reflectedRay, scene, depth-1);
+            color = add(color, hadamard(reflectedColor, scene.materials[intersectedMesh.material_id-1].mirror));
+        }
     }
     return color;
 }
@@ -247,11 +287,12 @@ int main(int argc, char* argv[])
         image[i*3+2] = backroundColor.z;
     }
 
+
     for (int j = 0; j < height; j++) { //main loop
         for (int i = 0; i < width; i++) {
             Ray ray{};
             ray = GenerateRay(i, j, scene.cameras[0], width, height);
-            auto color = ComputeColor(ray, scene);
+            auto color = ComputeColor(ray, scene, scene.max_recursion_depth);
             image[(j * width + i) * 3] = color.x > 255 ? 255 : round(color.x);
             image[(j * width + i) * 3 + 1] = color.y > 255 ? 255 : round(color.y);
             image[(j * width + i) * 3 + 2] = color.z > 255 ? 255 : round(color.z);
