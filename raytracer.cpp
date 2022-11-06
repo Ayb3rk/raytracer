@@ -67,9 +67,9 @@ parser::Vec3f NormalOfFace(parser::Face face, std::vector<parser::Vec3f> vertice
     parser::Vec3f v0 = vertices[face.v0_id];
     parser::Vec3f v1 = vertices[face.v1_id];
     parser::Vec3f v2 = vertices[face.v2_id];
-    parser::Vec3f v01 = sub(v0, v1);
-    parser::Vec3f v20 = sub(v2, v1);
-    return normalize(CrossProduct(v20, v01));
+    parser::Vec3f v01 = sub(v1, v0);
+    parser::Vec3f v02 = sub(v2, v0);
+    return normalize(CrossProduct(v01, v02));
 }
 
 Ray GenerateRay(int i, int j, const parser::Camera& camera, int width, int height)
@@ -186,6 +186,10 @@ float intersectFace (parser::Face face, Ray ray, parser::Scene scene) {
 
 }
 
+double CalculateLightDistance(parser::Vec3f lightPosition, parser::Vec3f intersectionPoint) {
+    return sqrt(pow(lightPosition.x - intersectionPoint.x, 2) + pow(lightPosition.y - intersectionPoint.y, 2) + pow(lightPosition.z - intersectionPoint.z, 2));
+}
+
 parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
 {
 
@@ -196,7 +200,7 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
     parser::Vec3f color{};
     parser::Sphere intersectedSphere{};
     parser::Mesh intersectedMesh{};
-    for (auto sphere : scene.spheres) {
+    for (const auto& sphere : scene.spheres) {
         auto sphereCenter = scene.vertex_data[sphere.center_vertex_id-1];
         float temp = intersectSphere(sphereCenter, sphere.radius, ray);
         if (temp > 0 && temp < t) {
@@ -204,12 +208,13 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
             intersectedSphere = sphere;
         }
     }
-    for (auto mesh : scene.meshes) {
+    for (const auto& mesh : scene.meshes) {
         for (auto face : mesh.faces) {
             auto temp = intersectFace(face, ray, scene);
             if (temp > 0 && temp < t) {
                 t = temp;
                 intersectedMesh = mesh;
+                intersectedSphere = {};
             }
         }
     }
@@ -218,42 +223,41 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
     }
     if (intersectedSphere.radius != 0) {
         auto P = add(ray.origin,multS(ray.direction,t));
-        auto L = normalize(add(scene.point_lights[0].position,multS(P,-1)));
         auto N = normalize(add(P,multS(scene.vertex_data[intersectedSphere.center_vertex_id-1],-1)));
         auto W = normalize(add(ray.origin,multS(P,-1)));
-        auto H = normalize(add(L,W));
-        auto lightDistance = sqrt((scene.point_lights[0].position.x-P.x)*(scene.point_lights[0].position.x-P.x)+(scene.point_lights[0].position.y-P.y)*(scene.point_lights[0].position.y-P.y)+(scene.point_lights[0].position.z-P.z)*(scene.point_lights[0].position.z-P.z));
-        auto receivedIrradiance = multS(scene.point_lights[0].intensity,1/(lightDistance*lightDistance));
-        auto cosAlphaSpecular = fmax(dot(N,H),0.0);
-        auto cosAlphaDiffuse = fmax(dot(N,L),0.0);
-        auto specular = multS(scene.materials[intersectedSphere.material_id-1].specular,pow(cosAlphaSpecular, scene.materials[intersectedSphere.material_id-1].phong_exponent));
-        auto diffuse = multS(scene.materials[intersectedSphere.material_id-1].diffuse,cosAlphaDiffuse);
-        color = add(color, add(diffuse, specular));
-        color = hadamard(color, receivedIrradiance);
-        color = add(color, hadamard(scene.materials[intersectedSphere.material_id-1].ambient, scene.ambient_light));
+        for (const auto& light : scene.point_lights) {
+            auto L = normalize(add(light.position,multS(P,-1)));
+            auto H = normalize(add(L,W));
+            auto lightDistance = CalculateLightDistance(light.position, P);
+            auto receivedIrradiance = multS(light.intensity,1/(lightDistance*lightDistance));
+            auto cosAlphaSpecular = fmax(dot(N,H),0.0);
+            auto cosAlphaDiffuse = fmax(dot(N,L),0.0);
+            auto specular = multS(scene.materials[intersectedSphere.material_id-1].specular,pow(cosAlphaSpecular, scene.materials[intersectedSphere.material_id-1].phong_exponent));
+            auto diffuse = multS(scene.materials[intersectedSphere.material_id-1].diffuse,cosAlphaDiffuse);
+            color = add(color, add(hadamard(diffuse, receivedIrradiance), hadamard(specular, receivedIrradiance)));
 
-        Ray reflectedRay{};
-        reflectedRay.origin = P;
-        reflectedRay.direction = normalize(add(ray.direction,multS(N,-2*dot(N,ray.direction))));
-        auto reflectedColor = ComputeColor(reflectedRay, scene, depth-1);
-        color = add(color, hadamard(reflectedColor, scene.materials[intersectedSphere.material_id-1].mirror));
+            Ray reflectedRay{};
+            reflectedRay.origin = P;
+            reflectedRay.direction = normalize(add(ray.direction,multS(N,-2*dot(N,ray.direction))));
+            auto reflectedColor = ComputeColor(reflectedRay, scene, depth-1);
+            color = add(color, hadamard(reflectedColor, scene.materials[intersectedSphere.material_id-1].mirror));
+        }
+        color = add(color, hadamard(scene.materials[intersectedSphere.material_id-1].ambient, scene.ambient_light));
     }
     if (!intersectedMesh.faces.empty()) {
+        auto P = add(ray.origin,multS(ray.direction,t));
+        auto N = normalize(NormalOfFace(intersectedMesh.faces[0], scene.vertex_data));
+        auto W = normalize(add(ray.origin,multS(P,-1)));
         for (auto lights : scene.point_lights) {
-            auto P = add(ray.origin,multS(ray.direction,t));
             auto L = normalize(add(lights.position,multS(P,-1)));
-            auto N = normalize(NormalOfFace(intersectedMesh.faces[0], scene.vertex_data));
-            auto W = normalize(add(ray.origin,multS(P,-1)));
             auto H = normalize(add(L,W));
             auto lightDistance = sqrt((lights.position.x-P.x)*(lights.position.x-P.x)+(lights.position.y-P.y)*(lights.position.y-P.y)+(lights.position.z-P.z)*(lights.position.z-P.z));
             auto receivedIrradiance = multS(lights.intensity,1/(lightDistance*lightDistance));
             auto cosAlphaSpecular = fmax(dot(N,H),0.0);
             auto cosAlphaDiffuse = fmax(dot(N,L),0.0);
             auto specular = multS(scene.materials[intersectedMesh.material_id-1].specular,pow(cosAlphaSpecular, scene.materials[intersectedMesh.material_id-1].phong_exponent));
-            auto diffuse = multS(scene.materials[intersectedMesh.material_id-1].diffuse,cosAlphaDiffuse);
-            color = add(color, add(diffuse, specular));
-            color = hadamard(color, receivedIrradiance);
-            color = add(color, hadamard(scene.materials[intersectedMesh.material_id-1].ambient, scene.ambient_light));
+            auto diffuse = multS(scene.materials[intersectedMesh.material_id-1].diffuse,(float) cosAlphaDiffuse);
+            color = add(color, add(hadamard(diffuse, receivedIrradiance), hadamard(specular, receivedIrradiance)));
 
             Ray reflectedRay{};
             reflectedRay.origin = P;
@@ -261,6 +265,7 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
             auto reflectedColor = ComputeColor(reflectedRay, scene, depth-1);
             color = add(color, hadamard(reflectedColor, scene.materials[intersectedMesh.material_id-1].mirror));
         }
+        color = add(color, hadamard(scene.materials[intersectedMesh.material_id-1].ambient, scene.ambient_light));
     }
     return color;
 }
