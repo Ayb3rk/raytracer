@@ -222,7 +222,7 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
         return color;
     }
     if (intersectedSphere.radius != 0) {
-        auto P = add(ray.origin,multS(ray.direction,t));
+        auto P = add(add(ray.origin,multS(ray.direction,t)), {scene.shadow_ray_epsilon, scene.shadow_ray_epsilon, scene.shadow_ray_epsilon});
         auto N = normalize(add(P,multS(scene.vertex_data[intersectedSphere.center_vertex_id-1],-1)));
         auto W = normalize(add(ray.origin,multS(P,-1)));
         for (const auto& light : scene.point_lights) {
@@ -245,7 +245,7 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
         color = add(color, hadamard(scene.materials[intersectedSphere.material_id-1].ambient, scene.ambient_light));
     }
     if (!intersectedMesh.faces.empty()) {
-        auto P = add(ray.origin,multS(ray.direction,t));
+        auto P = add(add(ray.origin,multS(ray.direction,t)), {scene.shadow_ray_epsilon, scene.shadow_ray_epsilon, scene.shadow_ray_epsilon});
         auto N = normalize(NormalOfFace(intersectedMesh.faces[0], scene.vertex_data));
         auto W = normalize(add(ray.origin,multS(P,-1)));
         for (auto lights : scene.point_lights) {
