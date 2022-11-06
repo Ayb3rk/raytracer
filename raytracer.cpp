@@ -64,12 +64,12 @@ parser::Vec3f CrossProduct(parser::Vec3f a, parser::Vec3f b) {
 }
 
 parser::Vec3f NormalOfFace(parser::Face face, std::vector<parser::Vec3f> vertices) {
-    parser::Vec3f v0 = vertices[face.v0_id];
-    parser::Vec3f v1 = vertices[face.v1_id];
-    parser::Vec3f v2 = vertices[face.v2_id];
+    parser::Vec3f v0 = vertices[face.v0_id-1];
+    parser::Vec3f v1 = vertices[face.v1_id-1];
+    parser::Vec3f v2 = vertices[face.v2_id-1];
     parser::Vec3f v01 = sub(v1, v0);
     parser::Vec3f v02 = sub(v2, v0);
-    return normalize(CrossProduct(v01, v02));
+    return CrossProduct(v01, v02);
 }
 
 Ray GenerateRay(int i, int j, const parser::Camera& camera, int width, int height)
@@ -151,27 +151,27 @@ float intersectFace (parser::Face face, Ray ray, parser::Scene scene) {
     float beta, gamma, t;
 
     float AMatrix[3][3] = {
-        {v0.x - v1.x, v0.x - v2.x, ray.direction.x}, //[a_x - b_x, a_x - c_x, d_x]
-        {v0.y - v1.y, v0.y - v2.y, ray.direction.y}, //[a_y - b_y, a_y - c_y, d_y]
-        {v0.z - v1.z, v0.z - v2.z, ray.direction.z} //[a_z - b_z, a_z - c_z, d_z]
+            {v0.x - v1.x, v0.x - v2.x, ray.direction.x}, //[a_x - b_x, a_x - c_x, d_x]
+            {v0.y - v1.y, v0.y - v2.y, ray.direction.y}, //[a_y - b_y, a_y - c_y, d_y]
+            {v0.z - v1.z, v0.z - v2.z, ray.direction.z} //[a_z - b_z, a_z - c_z, d_z]
     };
 
     float betaMatrix[3][3] = {
-        {v0.x - ray.origin.x, v0.x - v2.x, ray.direction.x}, //[a_x - o_x, a_x - c_x, d_x]
-        {v0.y - ray.origin.y, v0.y - v2.y, ray.direction.y}, //[a_y - o_y, a_y - c_y, d_y]
-        {v0.z - ray.origin.z, v0.z - v2.z, ray.direction.z} //[a_z - o_z, a_z - c_z, d_z]
+            {v0.x - ray.origin.x, v0.x - v2.x, ray.direction.x}, //[a_x - o_x, a_x - c_x, d_x]
+            {v0.y - ray.origin.y, v0.y - v2.y, ray.direction.y}, //[a_y - o_y, a_y - c_y, d_y]
+            {v0.z - ray.origin.z, v0.z - v2.z, ray.direction.z} //[a_z - o_z, a_z - c_z, d_z]
     };
 
     float gammaMatrix[3][3] = {
-        {v0.x - v1.x, v0.x - ray.origin.x, ray.direction.x}, //[a_x - b_x, a_x - o_x, d_x]
-        {v0.y - v1.y, v0.y - ray.origin.y, ray.direction.y}, //[a_y - b_y, a_y - o_y, d_y]
-        {v0.z - v1.z, v0.z - ray.origin.z, ray.direction.z} //[a_z - b_z, a_z - o_z, d_z]
+            {v0.x - v1.x, v0.x - ray.origin.x, ray.direction.x}, //[a_x - b_x, a_x - o_x, d_x]
+            {v0.y - v1.y, v0.y - ray.origin.y, ray.direction.y}, //[a_y - b_y, a_y - o_y, d_y]
+            {v0.z - v1.z, v0.z - ray.origin.z, ray.direction.z} //[a_z - b_z, a_z - o_z, d_z]
     };
 
     float tMatrix[3][3] = {
-        {v0.x - v1.x, v0.x - v2.x, v0.x - ray.origin.x}, //[a_x - b_x, a_x - c_x, a_x - o_x]
-        {v0.y - v1.y, v0.y - v2.y, v0.y - ray.origin.y}, //[a_y - b_y, a_y - c_y, a_y - o_y]
-        {v0.z - v1.z, v0.z - v2.z, v0.z - ray.origin.z} //[a_z - b_z, a_z - c_z, a_z - o_z]
+            {v0.x - v1.x, v0.x - v2.x, v0.x - ray.origin.x}, //[a_x - b_x, a_x - c_x, a_x - o_x]
+            {v0.y - v1.y, v0.y - v2.y, v0.y - ray.origin.y}, //[a_y - b_y, a_y - c_y, a_y - o_y]
+            {v0.z - v1.z, v0.z - v2.z, v0.z - ray.origin.z} //[a_z - b_z, a_z - c_z, a_z - o_z]
     };
 
     auto determinantA = determinant(AMatrix);
@@ -193,13 +193,14 @@ double CalculateLightDistance(parser::Vec3f lightPosition, parser::Vec3f interse
 parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
 {
 
-    if(depth == 0) {
+    if(depth < 0) {
         return {0, 0, 0};
     }
     float t = FLT_MAX;
     parser::Vec3f color{};
     parser::Sphere intersectedSphere{};
-    parser::Mesh intersectedMesh{};
+    parser::Face intersectedFace{};
+    int materialId = -1;
     for (const auto& sphere : scene.spheres) {
         auto sphereCenter = scene.vertex_data[sphere.center_vertex_id-1];
         float temp = intersectSphere(sphereCenter, sphere.radius, ray);
@@ -213,16 +214,17 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
             auto temp = intersectFace(face, ray, scene);
             if (temp > 0 && temp < t) {
                 t = temp;
-                intersectedMesh = mesh;
+                intersectedFace = face;
                 intersectedSphere = {};
+                materialId = mesh.material_id;
             }
         }
     }
     if (t == FLT_MAX) {
-        return color;
+        return {(float) scene.background_color.x, (float) scene.background_color.y, (float) scene.background_color.z};
     }
     if (intersectedSphere.radius != 0) {
-        auto P = add(add(ray.origin,multS(ray.direction,t)), {scene.shadow_ray_epsilon, scene.shadow_ray_epsilon, scene.shadow_ray_epsilon});
+        auto P = add(ray.origin,multS(ray.direction,t));
         auto N = normalize(add(P,multS(scene.vertex_data[intersectedSphere.center_vertex_id-1],-1)));
         auto W = normalize(add(ray.origin,multS(P,-1)));
         for (const auto& light : scene.point_lights) {
@@ -237,35 +239,36 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
             color = add(color, add(hadamard(diffuse, receivedIrradiance), hadamard(specular, receivedIrradiance)));
 
             Ray reflectedRay{};
-            reflectedRay.origin = P;
+            reflectedRay.origin = add(P, multS(N, scene.shadow_ray_epsilon));
             reflectedRay.direction = normalize(add(ray.direction,multS(N,-2*dot(N,ray.direction))));
+
             auto reflectedColor = ComputeColor(reflectedRay, scene, depth-1);
             color = add(color, hadamard(reflectedColor, scene.materials[intersectedSphere.material_id-1].mirror));
         }
         color = add(color, hadamard(scene.materials[intersectedSphere.material_id-1].ambient, scene.ambient_light));
     }
-    if (!intersectedMesh.faces.empty()) {
-        auto P = add(add(ray.origin,multS(ray.direction,t)), {scene.shadow_ray_epsilon, scene.shadow_ray_epsilon, scene.shadow_ray_epsilon});
-        auto N = normalize(NormalOfFace(intersectedMesh.faces[0], scene.vertex_data));
+    if (materialId != -1) {
+        auto P = add(ray.origin,multS(ray.direction,t));
+        auto N = normalize(NormalOfFace(intersectedFace, scene.vertex_data));
         auto W = normalize(add(ray.origin,multS(P,-1)));
         for (auto lights : scene.point_lights) {
             auto L = normalize(add(lights.position,multS(P,-1)));
             auto H = normalize(add(L,W));
-            auto lightDistance = sqrt((lights.position.x-P.x)*(lights.position.x-P.x)+(lights.position.y-P.y)*(lights.position.y-P.y)+(lights.position.z-P.z)*(lights.position.z-P.z));
+            auto lightDistance = CalculateLightDistance(lights.position, P);
             auto receivedIrradiance = multS(lights.intensity,1/(lightDistance*lightDistance));
             auto cosAlphaSpecular = fmax(dot(N,H),0.0);
             auto cosAlphaDiffuse = fmax(dot(N,L),0.0);
-            auto specular = multS(scene.materials[intersectedMesh.material_id-1].specular,pow(cosAlphaSpecular, scene.materials[intersectedMesh.material_id-1].phong_exponent));
-            auto diffuse = multS(scene.materials[intersectedMesh.material_id-1].diffuse,(float) cosAlphaDiffuse);
+            auto specular = multS(scene.materials[materialId-1].specular,pow(cosAlphaSpecular, scene.materials[materialId-1].phong_exponent));
+            auto diffuse = multS(scene.materials[materialId-1].diffuse,(float) cosAlphaDiffuse);
             color = add(color, add(hadamard(diffuse, receivedIrradiance), hadamard(specular, receivedIrradiance)));
 
             Ray reflectedRay{};
-            reflectedRay.origin = P;
+            reflectedRay.origin = add(P, multS(N, scene.shadow_ray_epsilon));
             reflectedRay.direction = normalize(add(ray.direction,multS(N,-2*dot(N,ray.direction))));
             auto reflectedColor = ComputeColor(reflectedRay, scene, depth-1);
-            color = add(color, hadamard(reflectedColor, scene.materials[intersectedMesh.material_id-1].mirror));
+            color = add(color, hadamard(reflectedColor, scene.materials[materialId-1].mirror));
         }
-        color = add(color, hadamard(scene.materials[intersectedMesh.material_id-1].ambient, scene.ambient_light));
+        color = add(color, hadamard(scene.materials[materialId-1].ambient, scene.ambient_light));
     }
     return color;
 }
