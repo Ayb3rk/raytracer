@@ -190,6 +190,25 @@ double CalculateLightDistance(parser::Vec3f lightPosition, parser::Vec3f interse
     return sqrt(pow(lightPosition.x - intersectionPoint.x, 2) + pow(lightPosition.y - intersectionPoint.y, 2) + pow(lightPosition.z - intersectionPoint.z, 2));
 }
 
+bool IsInShadow(parser::Vec3f intersectionPoint, parser::Vec3f lightPosition, parser::Scene scene) {
+    double lightDistance = CalculateLightDistance(lightPosition, intersectionPoint);
+    Ray shadowRay{};
+    shadowRay.origin = intersectionPoint;
+    shadowRay.direction = add(lightPosition, multS(intersectionPoint, -1));
+    for(const auto& mesh : scene.meshes) {
+        for(const auto& face : mesh.faces) {
+            float t = intersectFace(face, shadowRay, scene);
+            if (t > 0 && t < lightDistance) return true;
+        }
+    }
+    for(const auto& sphere : scene.spheres) {
+        auto sphereCenter = scene.vertex_data[sphere.center_vertex_id - 1];
+        float t = intersectSphere(sphereCenter, sphere.radius, shadowRay);
+        if (t > 0 && t < lightDistance) return true;
+    }
+    return false;
+}
+
 parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
 {
 
@@ -221,6 +240,9 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
         }
     }
     if (t == FLT_MAX) {
+        if(depth != scene.max_recursion_depth) {
+            return {0, 0, 0};
+        }
         return {(float) scene.background_color.x, (float) scene.background_color.y, (float) scene.background_color.z};
     }
     if (intersectedSphere.radius != 0) {
@@ -228,46 +250,50 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
         auto N = normalize(add(P,multS(scene.vertex_data[intersectedSphere.center_vertex_id-1],-1)));
         auto W = normalize(add(ray.origin,multS(P,-1)));
         for (const auto& light : scene.point_lights) {
+            if(IsInShadow(add(P, multS(N, scene.shadow_ray_epsilon)), light.position, scene)) {
+                continue;
+            }
             auto L = normalize(add(light.position,multS(P,-1)));
             auto H = normalize(add(L,W));
             auto lightDistance = CalculateLightDistance(light.position, P);
-            auto receivedIrradiance = multS(light.intensity,1/(lightDistance*lightDistance));
+            auto receivedIrradiance = multS(light.intensity,1.0f/(lightDistance*lightDistance));
             auto cosAlphaSpecular = fmax(dot(N,H),0.0);
             auto cosAlphaDiffuse = fmax(dot(N,L),0.0);
             auto specular = multS(scene.materials[intersectedSphere.material_id-1].specular,pow(cosAlphaSpecular, scene.materials[intersectedSphere.material_id-1].phong_exponent));
             auto diffuse = multS(scene.materials[intersectedSphere.material_id-1].diffuse,cosAlphaDiffuse);
             color = add(color, add(hadamard(diffuse, receivedIrradiance), hadamard(specular, receivedIrradiance)));
-
-            Ray reflectedRay{};
-            reflectedRay.origin = add(P, multS(N, scene.shadow_ray_epsilon));
-            reflectedRay.direction = normalize(add(ray.direction,multS(N,-2*dot(N,ray.direction))));
-
-            auto reflectedColor = ComputeColor(reflectedRay, scene, depth-1);
-            color = add(color, hadamard(reflectedColor, scene.materials[intersectedSphere.material_id-1].mirror));
         }
+        Ray reflectedRay{};
+        reflectedRay.origin = add(P, multS(N, scene.shadow_ray_epsilon));
+        reflectedRay.direction = normalize(add(ray.direction,multS(N,-2*dot(N,ray.direction))));
+
+        auto reflectedColor = ComputeColor(reflectedRay, scene, depth-1);
+        color = add(color, hadamard(reflectedColor, scene.materials[intersectedSphere.material_id-1].mirror));
         color = add(color, hadamard(scene.materials[intersectedSphere.material_id-1].ambient, scene.ambient_light));
     }
     if (materialId != -1) {
         auto P = add(ray.origin,multS(ray.direction,t));
         auto N = normalize(NormalOfFace(intersectedFace, scene.vertex_data));
         auto W = normalize(add(ray.origin,multS(P,-1)));
-        for (auto lights : scene.point_lights) {
-            auto L = normalize(add(lights.position,multS(P,-1)));
+        for (auto light : scene.point_lights) {
+            if(IsInShadow(add(P, multS(N, scene.shadow_ray_epsilon)), light.position, scene)) {
+                continue;
+            }
+            auto L = normalize(add(light.position,multS(P,-1)));
             auto H = normalize(add(L,W));
-            auto lightDistance = CalculateLightDistance(lights.position, P);
-            auto receivedIrradiance = multS(lights.intensity,1/(lightDistance*lightDistance));
+            auto lightDistance = CalculateLightDistance(light.position, P);
+            auto receivedIrradiance = multS(light.intensity,1/(lightDistance*lightDistance));
             auto cosAlphaSpecular = fmax(dot(N,H),0.0);
             auto cosAlphaDiffuse = fmax(dot(N,L),0.0);
             auto specular = multS(scene.materials[materialId-1].specular,pow(cosAlphaSpecular, scene.materials[materialId-1].phong_exponent));
             auto diffuse = multS(scene.materials[materialId-1].diffuse,(float) cosAlphaDiffuse);
             color = add(color, add(hadamard(diffuse, receivedIrradiance), hadamard(specular, receivedIrradiance)));
-
-            Ray reflectedRay{};
-            reflectedRay.origin = add(P, multS(N, scene.shadow_ray_epsilon));
-            reflectedRay.direction = normalize(add(ray.direction,multS(N,-2*dot(N,ray.direction))));
-            auto reflectedColor = ComputeColor(reflectedRay, scene, depth-1);
-            color = add(color, hadamard(reflectedColor, scene.materials[materialId-1].mirror));
         }
+        Ray reflectedRay{};
+        reflectedRay.origin = add(P, multS(N, scene.shadow_ray_epsilon));
+        reflectedRay.direction = normalize(add(ray.direction,multS(N,-2*dot(N,ray.direction))));
+        auto reflectedColor = ComputeColor(reflectedRay, scene, depth-1);
+        color = add(color, hadamard(reflectedColor, scene.materials[materialId-1].mirror));
         color = add(color, hadamard(scene.materials[materialId-1].ambient, scene.ambient_light));
     }
     return color;
@@ -284,17 +310,7 @@ int main(int argc, char* argv[])
     int width = scene.cameras[0].image_width;
     int height = scene.cameras[0].image_height;
 
-    auto backroundColor = scene.background_color;
-
     auto* image = new unsigned char [width * height * 3]; // 3 channels
-
-    for (int i = 0; i < width * height; ++i) //initialize image to backround color
-    {
-        image[i*3] = backroundColor.x;
-        image[i*3+1] = backroundColor.y;
-        image[i*3+2] = backroundColor.z;
-    }
-
 
     for (int j = 0; j < height; j++) { //main loop
         for (int i = 0; i < width; i++) {
