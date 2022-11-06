@@ -3,5 +3,7 @@ project(graph_hw1)
 
 set(CMAKE_CXX_STANDARD 17)
 add_compile_options(-O3)
+add_compile_options(-pthread)
+add_compile_options(-std=c++0x)
 
 add_executable(graph_hw1 parser.cpp parser.h ppm.cpp ppm.h raytracer.cpp tinyxml2.cpp tinyxml2.h)

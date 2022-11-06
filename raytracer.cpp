@@ -2,6 +2,12 @@
 #include "ppm.h"
 #include <cmath>
 #include <cfloat>
+#include <thread>
+#include <iostream>
+
+const int THREAD_COUNT = 8;
+
+unsigned char* image;
 
 typedef unsigned char RGB[3];
 
@@ -299,6 +305,18 @@ parser::Vec3f ComputeColor(Ray ray, parser::Scene scene, int depth)
     return color;
 }
 
+void render(int row_start, int row_count, int width, parser::Scene scene, int depth){
+    for (int i = row_start; i < row_start + row_count; i++) {
+        for (int j = 0; j < width; j++) {
+            Ray ray = GenerateRay(j, i, scene.cameras[0], width, row_count * THREAD_COUNT);
+            auto color = ComputeColor(ray, scene, depth);
+            image[(i * width + j) * 3] = color.x > 255 ? 255 : round(color.x);
+            image[(i * width + j) * 3 + 1] = color.y > 255 ? 255 : round(color.y);
+            image[(i * width + j) * 3 + 2] = color.z > 255 ? 255 : round(color.z);
+        }
+    }
+}
+
 int main(int argc, char* argv[])
 {
     // Sample usage for reading an XML scene file
@@ -310,18 +328,32 @@ int main(int argc, char* argv[])
     int width = scene.cameras[0].image_width;
     int height = scene.cameras[0].image_height;
 
-    auto* image = new unsigned char [width * height * 3]; // 3 channels
+    image = new unsigned char[width * height * 3];
 
-    for (int j = 0; j < height; j++) { //main loop
-        for (int i = 0; i < width; i++) {
-            Ray ray{};
-            ray = GenerateRay(i, j, scene.cameras[0], width, height);
-            auto color = ComputeColor(ray, scene, scene.max_recursion_depth);
-            image[(j * width + i) * 3] = color.x > 255 ? 255 : round(color.x);
-            image[(j * width + i) * 3 + 1] = color.y > 255 ? 255 : round(color.y);
-            image[(j * width + i) * 3 + 2] = color.z > 255 ? 255 : round(color.z);
-        }
+    //create threads and assign work to them
+    std::vector<std::thread> threads;
+    int rowsPerThread = height/THREAD_COUNT;
+    for (int t = 0; t < THREAD_COUNT; t++) {
+        threads.push_back(std::thread(render, t * rowsPerThread, rowsPerThread, width, scene, scene.max_recursion_depth));
+        std::cout<<"Thread "<<t+1<<" started"<<std::endl;
     }
+
+    //wait for threads to finish
+    for (auto& t : threads) {
+        t.join();
+    }
+
+
+//    for (int j = 0; j < height; j++) { //main loop
+//        for (int i = 0; i < width; i++) {
+//            Ray ray{};
+//            ray = GenerateRay(i, j, scene.cameras[0], width, height);
+//            auto color = ComputeColor(ray, scene, scene.max_recursion_depth);
+//            image[(j * width + i) * 3] = color.x > 255 ? 255 : round(color.x);
+//            image[(j * width + i) * 3 + 1] = color.y > 255 ? 255 : round(color.y);
+//            image[(j * width + i) * 3 + 2] = color.z > 255 ? 255 : round(color.z);
+//        }
+//    }
 
     write_ppm("test.ppm", image, width, height);
 
