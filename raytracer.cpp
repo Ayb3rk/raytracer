@@ -194,7 +194,7 @@ bool IsInShadow(parser::Vec3f intersectionPoint, parser::Vec3f lightPosition, pa
     double lightDistance = CalculateLightDistance(lightPosition, intersectionPoint);
     Ray shadowRay{};
     shadowRay.origin = intersectionPoint;
-    shadowRay.direction = add(lightPosition, multS(intersectionPoint, -1));
+    shadowRay.direction = normalize(add(lightPosition, multS(intersectionPoint, -1)));
     for(const auto& mesh : scene.meshes) {
         for(const auto& face : mesh.faces) {
             float t = intersectFace(face, shadowRay, scene);
