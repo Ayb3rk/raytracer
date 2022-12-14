@@ -1,2 +1,2 @@
-# raytracer
-A raytracking algorith coded in C++.
+# Raytracer
+A raytracer algorithm coded in C++.
